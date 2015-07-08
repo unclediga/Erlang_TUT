@@ -1,18 +1,44 @@
 -module(map_reduce).
 
 -export([start/1]).
--export([reduce/2, map/2, loop/1]).
+-export([reduce/2, map/2]).
+-export([loop_map/2,loop_reduce/3,start/0]).
 
+
+start() ->
+	start(["data1.txt","data2.txt","data3.txt","data4.txt","data5.txt"]).
 
 start(Files) ->
     %% BEGIN
     Live_files = lists:filter(fun filelib:is_file/1, Files),
-    spawn(?MODULE,loop,[{self(),"data1.txt"}]),
+    io:format("find files: ~p~n",[Live_files]),
+
+    PidR = spawn(?MODULE,loop_reduce,[self(),length(Live_files),#{}]),
+
+    [spawn(?MODULE,loop_map,[PidR,F]) || F <- Live_files ],
+	
+
     receive
-    	{ok,Replay} -> Replay;
-    	_Any -> {error}
-    after 500 -> no_replay
+    	{ok,Replay} -> Replay
+    after 10000 -> no_replay
     end. 
+
+
+
+
+loop_map(Pid,File) ->
+	Pid ! {ok, map([],File)}.
+	
+loop_reduce(Pid,Num,Map) ->
+	%Pid ! {loop_reduce,Pid,Num,Map},
+	receive
+		{ok,MapN} when Num == 1 -> 
+			Pid ! {ok,reduce(MapN,Map)};
+		{ok,MapN} ->
+			loop_reduce(Pid, Num - 1, reduce(MapN,Map));
+		_Any -> {reduce_error,_Any}	
+	after 10000 -> {reduce_error, Num}		
+	end.	
 
 
     %% END
@@ -25,23 +51,17 @@ start(Files) ->
 %	end.   
 
 
-reduce(P1,P2)	-> underconstr.
+reduce(MapN,Map) ->
+	%maps:put("k"++io_lib:print(maps:size(Map) + 1),true,Map).
+	 maps:fold(fun(K,V,Acc) -> maps:put(K,maps:get(K,Acc,0) + V,Acc) end,
+	 	Map, MapN).
 
-map(P1,File_list)	-> 
-	lists:map(fun map/1,File_list).
 
-map(File_name) -> 	
+
+map(M,File_name) -> 	
 	{_,Bin} = file:read_file(File_name), 
 	Str = unicode:characters_to_list(Bin),
 	L = string:tokens(Str," \r\n"),    
 	lists:foldl(fun(E,Acc) -> maps:put(E,maps:get(E,Acc,0) + 1,Acc) end,
 				#{},L).
 
-loop(State) ->
-    io:format("spawn: State is ~p~n",[State]), 
-	{ParentPid,File_name} = State,
-	io:format("spawn: File name is ~s~n",[File_name]),
-	ParentPid ! {ok,File_name}.
-%% {_,Bin} = file:read_file("data1.txt"). 
-%% unicode:characters_to_list(Bin)
-%% string:tokens(Str," \r\n").    
